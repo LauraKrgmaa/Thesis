@@ -132,6 +132,7 @@ int ml_init() {
     }
 
     configure_leds();
+    //configure_button();
     k_sem_give(&init_done_sem); 
 
     if (sizeof(features) / sizeof(float) != EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE) {
@@ -239,7 +240,7 @@ void get_sample(void *p1, void *p2, void *p3) {
     uint32_t samples_collected = 0;
     uint32_t report_interval = 100;
 
-    // Part 1: fill for 1 second
+    // fill for 1 second
     while (k_uptime_get() - start_time < 1000) {
         if (sensor_sample_fetch(sensor_dev) < 0) {
             LOG_ERR("MPU6050 sensor sample update error");
@@ -257,9 +258,6 @@ void get_sample(void *p1, void *p2, void *p3) {
         double norm_z_gy = normalize_gyro(sensor_value_to_double(&gyro[2]));
         // idx is the base float index for this sample (each sample = 3 floats)
         uint32_t idx = (circ_write_idx % SAMPLES_IN_WINDOW) * 6;
-        //circ_buf[idx + 0] = sensor_value_to_double(&gyro[0]);
-        //circ_buf[idx + 1] = sensor_value_to_double(&gyro[1]);
-        //circ_buf[idx + 2] = sensor_value_to_double(&gyro[2]);
         circ_buf[idx + 0] = norm_x_ac;
         circ_buf[idx + 1] = norm_y_ac;
         circ_buf[idx + 2] = norm_z_ac;
@@ -277,7 +275,7 @@ void get_sample(void *p1, void *p2, void *p3) {
     k_timer_init(&mytimer, mytimer_l, NULL); //expiry function is mytimer_l
     k_timer_start(&mytimer, K_SECONDS(0), K_MSEC(20)); //delay and period
 
-    // Part 2: keep writing forever
+    // keep writing forever
     uint32_t total_samples = 0;
     int64_t last_report_time = k_uptime_get();
 
@@ -295,7 +293,6 @@ void get_sample(void *p1, void *p2, void *p3) {
            last_report_time = now;
        }
     }
-    
 }
 
 
@@ -315,12 +312,12 @@ void ml_run(void *p1, void *p2, void *p3) {
         uint32_t samples_to_copy_first = SAMPLES_IN_WINDOW - head_sample;
         uint32_t floats_to_copy_first = samples_to_copy_first * 6;//change to 3 when gyro only
 
-        // Copy from the head to the end of the circ_buf
+        // copy head to the end of the circ_buf
         memcpy(features, 
                &circ_buf[head_float], 
                floats_to_copy_first * sizeof(float));
 
-        // Copyy from the start of circ_buf to the head (the wrap-around part)
+        // copy start of circ_buf to the head (the wrap-around part)
         if (head_float > 0) {
             memcpy(&features[floats_to_copy_first], 
                    &circ_buf[0], 
@@ -338,6 +335,7 @@ void ml_run(void *p1, void *p2, void *p3) {
         EI_IMPULSE_ERROR res = run_classifier(&signal, &result, false);
         int64_t end_time = k_uptime_get();
 
+        // 5. Results
         LOG_INF("Inference took %d ms (DSP: %d ms, NN: %d ms)",
                 (int32_t)(end_time - start_time),
                 result.timing.dsp,
@@ -346,8 +344,6 @@ void ml_run(void *p1, void *p2, void *p3) {
         if (res == 0) {
             classification_results(&result, end_time - start_time);
         }
-        //backlog prevention
-
         k_sem_reset(&data_sem);
     }
 }
