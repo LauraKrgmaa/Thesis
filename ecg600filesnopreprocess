@@ -10,9 +10,8 @@ from scipy.signal import butter, filtfilt, find_peaks
 ROOT_FOLDER = Path(r"C:\Users\Laura\ECG_10000")
 DIAGNOSTICS_FILE = ROOT_FOLDER / "Diagnostics.csv"
 INPUT_DATA_FOLDER = ROOT_FOLDER / "ECGDataDenoised"
-
-OUTPUT_RAW  = ROOT_FOLDER / "Dataset_Raw_Lead2_ST_600_7070"   
-
+OUTPUT_RAW  = ROOT_FOLDER / "Dataset_Raw_Lead2_ST_600"   
+#if want to get 200 files change SAMPLES_PER_CLASS to 100
 SAMPLES_PER_CLASS = 300
 TRAIN_SPLIT = 0.8
 
