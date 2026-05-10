@@ -1,0 +1,106 @@
+
+import csv
+import random
+from pathlib import Path
+
+import numpy as np
+from scipy.signal import butter, filtfilt, find_peaks
+
+# paths
+ROOT_FOLDER = Path(r"C:\Users\Laura\ECG_10000")
+DIAGNOSTICS_FILE = ROOT_FOLDER / "Diagnostics.csv"
+INPUT_DATA_FOLDER = ROOT_FOLDER / "ECGDataDenoised"
+
+OUTPUT_RAW  = ROOT_FOLDER / "Dataset_Raw_Lead2_ST_600_7070"   
+
+SAMPLES_PER_CLASS = 300
+TRAIN_SPLIT = 0.8
+
+FS = 500
+TIMESTAMP_STEP_MS = 1000 // FS
+
+
+
+def write_raw_csv(path, signal):
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["timestamp", "leadII"])
+        for i, v in enumerate(signal):
+            w.writerow([i * TIMESTAMP_STEP_MS, f"{float(v):.6f}"])
+
+
+def process_datasets():
+    print("Reading diagnostics, filtering SR and ST...")
+    normal_pool, abnormal_pool = [], []
+    with open(DIAGNOSTICS_FILE, newline="", encoding="utf-8-sig") as f:
+        reader = csv.reader(f, delimiter=";")
+        next(reader, None)
+        for row in reader:
+            if len(row) < 2:
+                continue
+            fname, rhythm = row[0].strip(), row[1].strip().upper()
+            if rhythm == "SR":
+                normal_pool.append(fname)
+            elif rhythm == "ST":
+                abnormal_pool.append(fname)
+
+    if len(normal_pool) < SAMPLES_PER_CLASS or len(abnormal_pool) < SAMPLES_PER_CLASS:
+        print(f"Not enough samples. SR: {len(normal_pool)}, ST: {len(abnormal_pool)}")
+        return
+
+    random.seed(42)
+    selected = []
+    for name in random.sample(normal_pool, SAMPLES_PER_CLASS):
+        selected.append({"name": name, "label": "Normal"})
+    for name in random.sample(abnormal_pool, SAMPLES_PER_CLASS):
+        selected.append({"name": name, "label": "Abnormal"})
+
+    random.shuffle(selected)
+    normals   = [x for x in selected if x["label"] == "Normal"]
+    abnormals = [x for x in selected if x["label"] == "Abnormal"]
+    n_tr_n = int(len(normals)   * TRAIN_SPLIT)
+    n_tr_a = int(len(abnormals) * TRAIN_SPLIT)
+    train_items = normals[:n_tr_n]   + abnormals[:n_tr_a]
+    test_items  = normals[n_tr_n:]   + abnormals[n_tr_a:]
+    print(f"Train recordings: {len(train_items)}  Test recordings: {len(test_items)}")
+
+    (OUTPUT_RAW  / "training").mkdir(parents=True, exist_ok=True)
+    (OUTPUT_RAW  / "testing").mkdir(parents=True, exist_ok=True)
+
+    def process_split(items, split_name):
+        out_dir_raw = OUTPUT_RAW  / split_name
+        total_strips = 0
+        total_recordings_used = 0
+
+        for item in items:
+            input_path = INPUT_DATA_FOLDER / f"{item['name']}.csv"
+            if not input_path.exists():
+                continue
+
+            with open(input_path, newline="", encoding="utf-8-sig") as f:
+                reader = csv.reader(f)
+                try:
+                    signal = np.array([float(row[1]) for row in reader],
+                                      dtype=np.float32)
+                except (ValueError, IndexError):
+                    continue
+
+            if len(signal) < FS * 2:
+                continue
+            raw_fname = f"{item['label']}.{item['name']}.csv"
+            write_raw_csv(out_dir_raw / raw_fname, signal)
+
+            total_recordings_used += 1
+
+        print(f"  {split_name}: {total_recordings_used} recordings -> "
+              f"{total_strips} strip files (+ {total_recordings_used} raw files)")
+
+    print("\nProcessing training set...")
+    process_split(train_items, "training")
+    print("Processing testing set...")
+    process_split(test_items, "testing")
+    print(f"Raw output         : {OUTPUT_RAW}")
+
+
+if __name__ == "__main__":
+    process_datasets()
