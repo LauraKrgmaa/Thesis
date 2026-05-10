@@ -1,0 +1,171 @@
+"""
+Preprocessing ablation script for ECG SR vs ST classification.
+Takes the already-split raw dataset.
+Variants produced:
+  1. Dataset_OldNormalization_Lead2_ST/
+        -> applies the normalize_data_std() function
+           (global z-score across all recordings + max-scaling)
+
+  2. Dataset_BandpassOnly_Lead2_ST/
+        -> applies the 0.5-40 Hz bandpass filter
+Input folder structure expected:
+  Dataset_RawFiles_Lead2_ST/
+      training/  Normal.MUSE_xxx.csv, Abnormal.MUSE_yyy.csv, ...
+      testing/   Normal.MUSE_xxx.csv, Abnormal.MUSE_yyy.csv, ...
+"""
+import csv
+from pathlib import Path
+
+import numpy as np
+import torch
+from scipy.signal import butter, filtfilt
+#paths
+ROOT_FOLDER = Path(r"C:\Users\Laura\ECG_10000")
+
+RAW_INPUT_ROOT = ROOT_FOLDER / "Dataset_RawFiles_Lead2_ST_secondtry"
+
+# output  folders
+OUT_OLDNORM   = ROOT_FOLDER / "Dataset_OldNormalization_Lead2_ST"
+OUT_BANDPASS  = ROOT_FOLDER / "Dataset_BandpassOnly_Lead2_ST"
+
+# ECG parameters (must match how the raw files were written)
+FS = 500
+TIMESTAMP_STEP_MS = 1000 // FS   # 2 ms at 500 Hz
+
+# Filter band
+BANDPASS_LOW = 0.5
+BANDPASS_HIGH = 40.0
+
+
+# helper functions
+def bandpass_filter(signal: np.ndarray, fs: int) -> np.ndarray:
+    nyq = 0.5 * fs
+    b, a = butter(N=3, Wn=[BANDPASS_LOW / nyq, BANDPASS_HIGH / nyq], btype="band")
+    return filtfilt(b, a, signal)
+
+
+def read_raw_csv(path: Path) -> np.ndarray:
+    """Read a raw CSV (timestamp, leadII) and return the leadII column."""
+    with open(path, newline="", encoding="utf-8-sig") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)  # skip header
+        signal = [float(row[1]) for row in reader if len(row) >= 2]
+    return np.array(signal, dtype=np.float32)
+
+
+def write_signal_csv(path: Path, signal: np.ndarray):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(["timestamp", "leadII"])
+        for i, v in enumerate(signal):
+            w.writerow([i * TIMESTAMP_STEP_MS, f"{float(v):.6f}"])
+
+
+def list_split_files(split_dir: Path) -> list:
+    """Return sorted list of CSV files in a split directory."""
+    if not split_dir.exists():
+        return []
+    return sorted(split_dir.glob("*.csv"))
+
+
+def normalize_data_std(train_data, test_data):
+    mean_data = torch.mean(torch.cat((train_data.flatten(), test_data.flatten())))
+    std_data = torch.std(torch.cat((train_data.flatten(), test_data.flatten())))
+    #train_data = train_data / (max_data - min_data)
+    #test_data = test_data / (max_data - min_data)
+
+    train_data = (train_data - mean_data) / (std_data)
+    train_data = 2 * train_data / torch.max(train_data)
+    test_data = (test_data - mean_data) / (std_data)
+    test_data = 2 * test_data / torch.max(test_data)
+
+    #print(torch.max(train_data), torch.min(train_data))
+    #print(torch.max(test_data), torch.min(test_data))
+    print("mean-std:", mean_data, std_data)
+
+    return train_data, test_data
+
+def variant_bandpass_only(input_root: Path, output_root: Path):
+    """Bandpass filter only. Each recording kept independent."""
+    print(f"\n[Bandpass only] -> {output_root}")
+    for split in ("training", "testing"):
+        files = list_split_files(input_root / split)
+        out_dir = output_root / split
+        count = 0
+        for fp in files:
+            try:
+                signal = read_raw_csv(fp)
+            except (ValueError, IndexError):
+                continue
+            if len(signal) < FS * 2:
+                continue
+            filtered = bandpass_filter(signal, FS).astype(np.float32)
+            write_signal_csv(out_dir / fp.name, filtered)
+            count += 1
+        print(f"  {split}: {count} files written")
+
+
+def variant_old_normalization(input_root: Path, output_root: Path):
+    print(f"\n[Old normalization] -> {output_root}")
+
+    train_files = list_split_files(input_root / "training")
+    test_files  = list_split_files(input_root / "testing")
+
+    def load_all(files):
+        sigs, names = [], []
+        for fp in files:
+            try:
+                s = read_raw_csv(fp)
+            except (ValueError, IndexError):
+                continue
+            if len(s) < FS * 2:
+                continue
+            sigs.append(s)
+            names.append(fp.name)
+        return sigs, names
+
+    train_sigs, train_names = load_all(train_files)
+    test_sigs,  test_names  = load_all(test_files)
+
+    if not train_sigs or not test_sigs:
+        print("  Not enough data to run old normalization.")
+        return
+
+    min_len = min(min(len(s) for s in train_sigs),
+                  min(len(s) for s in test_sigs))
+    print(f"  Truncating all recordings to {min_len} samples "
+          f"({min_len * TIMESTAMP_STEP_MS} ms)")
+
+    train_stack = torch.tensor(
+        np.stack([s[:min_len] for s in train_sigs]), dtype=torch.float32)
+    test_stack = torch.tensor(
+        np.stack([s[:min_len] for s in test_sigs]), dtype=torch.float32)
+
+    norm_train, norm_test = normalize_data_std(train_stack, test_stack)
+
+    for name, row in zip(train_names, norm_train):
+        write_signal_csv(output_root / "training" / name, row.numpy())
+    for name, row in zip(test_names, norm_test):
+        write_signal_csv(output_root / "testing" / name, row.numpy())
+
+    print(f"  training: {len(train_names)} files written")
+    print(f"  testing : {len(test_names)} files written")
+
+def main():
+    if not RAW_INPUT_ROOT.exists():
+        print(f"ERROR: input folder not found: {RAW_INPUT_ROOT}")
+        return
+
+    print(f"Input raw dataset: {RAW_INPUT_ROOT}")
+    for split in ("training", "testing"):
+        files = list_split_files(RAW_INPUT_ROOT / split)
+        print(f"  {split}: {len(files)} raw files")
+
+    variant_bandpass_only(RAW_INPUT_ROOT, OUT_BANDPASS)
+    variant_old_normalization(RAW_INPUT_ROOT, OUT_OLDNORM)
+
+
+
+if __name__ == "__main__":
+    main()
