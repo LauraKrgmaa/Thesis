@@ -22,5 +22,5 @@ ml-test/
 ├── build
 ```
 if for example 1DCNNtestdata has to be run then this is the structure of the visual studio code project and files from under LSTM_live_inference can be used (only the ml.cpp changes). Visual studio code is used to build the project and nFR Connect for Desktop is used to flash on to the microcontroller and look at the terminal if needed. 
-Under each folder are also zephyr.signed.hex files these are flashed onto the microcontroller.
+Under each folder are also zephyr.signed.hex files these are flashed onto the microcontroller. The live inference has the signed hex file for the version that had the shortest inference time (unoptimized/quantized).
 
