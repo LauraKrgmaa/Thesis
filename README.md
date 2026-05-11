@@ -21,5 +21,6 @@ ml-test/
 ├── tflite-model (from the zip file)
 ├── build
 ```
-if for example 1DCNNtestdata has to be run then this is the structure of the visual studio code project and files from under LSTM_live_inference can be used (only the ml.cpp changes). Visual studio code is used to build the project and nFR Connect for Desktop is used to flash on to the microcontroller and look at the terminal if needed.
+if for example 1DCNNtestdata has to be run then this is the structure of the visual studio code project and files from under LSTM_live_inference can be used (only the ml.cpp changes). Visual studio code is used to build the project and nFR Connect for Desktop is used to flash on to the microcontroller and look at the terminal if needed. 
+Under each folder are also zephyr.signed.hex files these are flashed onto the microcontroller.
 
